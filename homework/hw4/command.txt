@@ -1,0 +1,13 @@
+gcc -pthread parallel_hashtable.c -o parallel_hashtable
+./parallel_hashtable 1
+./parallel_hashtable 8
+
+
+gcc -pthread "parallel mutex.c" -o "parallel mutex"
+./"parallel mutex" 1
+./"parallel mutex" 8
+
+
+gcc -pthread "parallel spin.c" -o "parallel spin"
+./"parallel spin" 1
+./"parallel spin" 8

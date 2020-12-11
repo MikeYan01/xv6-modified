@@ -1,0 +1,6 @@
+.DS_Store
+OS asg2.pdf
+a.txt
+doggerel.txt
+shell
+shell.c

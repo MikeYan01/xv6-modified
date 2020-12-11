@@ -1,0 +1,179 @@
+0001-Implement-lottery-scheduling.patch
+837d0 Mon Sep 17 00:00:00 2001
+From: MikeYan01 <yly374779040@gmail.com>
+Date: Thu, 5 Nov 2020 13:59:25 -0500
+Subject: [PATCH] Implement lottery scheduling
+
+---
+ Makefile  |  1 +
+ proc.c    | 27 +++++++++++++++++++++++++++
+ proc.h    |  1 +
+ syscall.c |  2 ++
+ syscall.h |  1 +
+ sysproc.c |  7 +++++++
+ user.h    |  1 +
+ usys.S    |  1 +
+ 8 files changed, 41 insertions(+)
+
+diff --git a/Makefile b/Makefile
+index 5d91068..7d17a81 100644
+--- a/Makefile
++++ b/Makefile
+@@ -174,6 +174,7 @@ UPROGS=\
+ 	_wc\
+ 	_zombie\
+ 	_hackbench\
++	_lotterytest\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff --git a/proc.c b/proc.c
+index b122e3b..d8261d7 100644
+--- a/proc.c
++++ b/proc.c
+@@ -50,6 +50,7 @@ allocproc(void)
+ found:
+   p->state = EMBRYO;
+   p->pid = nextpid++;
++  p->tickets = 20; // New processes are assigned 20 lottery tickets when they are created
+   release(&ptable.lock);
+ 
+   // Allocate kernel stack.
+@@ -257,6 +258,17 @@ wait(void)
+   }
+ }
+ 
++// loop over runnable processes and count total ticket
++int getTotalTicket(void) {
++  int totalTicket = 0;
++
++  struct proc* p;
++  for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
++    if (p->state == RUNNABLE)
++      totalTicket += p->tickets;
++  return totalTicket;
++}
++
+ //PAGEBREAK: 42
+ // Per-CPU process scheduler.
+ // Each CPU calls scheduler() after setting itself up.
+@@ -271,6 +283,9 @@ scheduler(void)
+   struct proc *p;
+   int foundproc = 1;
+ 
++  long winningTicket = 0;
++  int cumulativeTicket = 0;
++
+   for(;;){
+     // Enable interrupts on this processor.
+     sti();
+@@ -280,10 +295,21 @@ scheduler(void)
+ 
+     // Loop over process table looking for process to run.
+     acquire(&ptable.lock);
++
++    // generate the winning ticket
++    winningTicket = random_at_most(getTotalTicket());
++
++    // current cumulative ticket number
++    cumulativeTicket = 0;
++
+     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+       if(p->state != RUNNABLE)
+         continue;
+ 
++        // pick the one with the winning ticket
++        cumulativeTicket += p->tickets;
++        if (cumulativeTicket < winningTicket) continue;
++
+       // Switch to chosen process.  It is the process's job
+       // to release ptable.lock and then reacquire it
+       // before jumping back to us.
+@@ -297,6 +323,7 @@ scheduler(void)
+       // Process is done running for now.
+       // It should have changed its p->state before coming back.
+       proc = 0;
++      break;
+     }
+     release(&ptable.lock);
+ 
+diff --git a/proc.h b/proc.h
+index 3b9c3ac..d37f79f 100644
+--- a/proc.h
++++ b/proc.h
+@@ -66,6 +66,7 @@ struct proc {
+   struct file *ofile[NOFILE];  // Open files
+   struct inode *cwd;           // Current directory
+   char name[16];               // Process name (debugging)
++  int tickets;                 // tracks how many tickets the process has
+ };
+ 
+ // Process memory is laid out contiguously, low addresses first:
+diff --git a/syscall.c b/syscall.c
+index 0e06ad4..889da87 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -99,6 +99,7 @@ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
+ extern int sys_gettime(void);
++extern int sys_settickets(void); // new system call
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -123,6 +124,7 @@ static int (*syscalls[])(void) = {
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
+ [SYS_gettime] sys_gettime,
++[SYS_settickets]   sys_settickets, // new system call
+ };
+ 
+ void
+diff --git a/syscall.h b/syscall.h
+index 6d6c224..e59bc4a 100644
+--- a/syscall.h
++++ b/syscall.h
+@@ -21,3 +21,4 @@
+ #define SYS_mkdir  20
+ #define SYS_close  21
+ #define SYS_gettime 22
++#define SYS_settickets 23
+diff --git a/sysproc.c b/sysproc.c
+index ddaed7c..4fa642d 100644
+--- a/sysproc.c
++++ b/sysproc.c
+@@ -98,3 +98,10 @@ sys_gettime(void) {
+   cmostime(d);
+   return 0;
+ }
++
++// fetch ticket number from system call argument, or set to default 20 if invalid
++int sys_settickets(void) {
++  int number;
++  proc -> tickets = argint(0, &number) < 0 ? 20 : number;
++  return 0;
++}
+diff --git a/user.h b/user.h
+index 46d1059..ff7d789 100644
+--- a/user.h
++++ b/user.h
+@@ -24,6 +24,7 @@ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
+ int gettime(struct rtcdate *);
++int settickets(int); // new system call
+ 
+ // ulib.c
+ int stat(char*, struct stat*);
+diff --git a/usys.S b/usys.S
+index e556d66..27646a9 100644
+--- a/usys.S
++++ b/usys.S
+@@ -30,3 +30,4 @@ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
+ SYSCALL(gettime)
++SYSCALL(settickets)
+-- 
+2.27.0
+
